@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { QrCode, CreditCard, Nfc, Camera, X } from 'lucide-react';
+import { QrCode, FileText, Nfc, Camera, X } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 
-type ScanMode = 'qr' | 'barcode' | 'nfc' | null;
+type ScanMode = 'qr' | 'text' | 'nfc' | null;
 
 function ScanView() {
   const [scanMode, setScanMode] = useState<ScanMode>(null);
@@ -19,7 +19,7 @@ function ScanView() {
 
   // ---- QR Camera + OCR Start ----
   useEffect(() => {
-    if (isScanning && scanMode === 'qr') {
+    if (isScanning && (scanMode === 'qr' || scanMode === 'text')) {
       startCamera();
     }
     return () => {
@@ -45,7 +45,7 @@ function ScanView() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-      setStatus('Camera active. Position QR code and click capture.');
+      setStatus('Camera active. Position text and click capture.');
     } catch (error) {
       console.error('Camera/OCR Init Error:', error);
       setStatus('Error initializing OCR or accessing camera.');
@@ -167,22 +167,22 @@ function ScanView() {
                 </div>
               </button>
 
-              {/* Barcode */}
+              {/* Text Reader */}
               <button
-                onClick={() => startScan('barcode')}
+                onClick={() => startScan('text')}
                 className="group relative bg-slate-800/60 backdrop-blur-xl rounded-3xl shadow-xl hover:shadow-2xl border border-slate-700/50 p-8 transition-all hover:-translate-y-2 hover:bg-slate-800/80 overflow-hidden"
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <div className="relative z-10 flex flex-col items-center gap-4">
                   <div className="p-6 bg-gradient-to-br from-orange-500/20 to-amber-500/20 rounded-3xl group-hover:scale-110 transition-all duration-300 shadow-lg backdrop-blur-sm border border-orange-400/30">
-                    <CreditCard className="w-12 h-12 text-orange-400 drop-shadow-sm" />
+                    <FileText className="w-12 h-12 text-orange-400 drop-shadow-sm" />
                   </div>
                   <div className="text-center">
                     <h3 className="text-xl font-semibold text-slate-200 mb-2 drop-shadow-sm">
-                      Barcode
+                      Text Reader
                     </h3>
                     <p className="text-slate-400 text-sm drop-shadow-sm">
-                      Scan product barcodes
+                      Extract text from images
                     </p>
                   </div>
                 </div>
@@ -216,7 +216,7 @@ function ScanView() {
                 <h3 className="text-lg font-semibold text-white flex items-center gap-2 drop-shadow-sm">
                   <Camera className="w-5 h-5" />
                   {scanMode === 'qr' && 'QR Code Scanner'}
-                  {scanMode === 'barcode' && 'Barcode Scanner'}
+                  {scanMode === 'text' && 'Text Reader'}
                   {scanMode === 'nfc' && 'NFC Reader'}
                 </h3>
                 <button
@@ -229,7 +229,7 @@ function ScanView() {
 
               {/* Scanner Area */}
               <div className="p-8 flex flex-col items-center gap-4">
-                {scanMode === 'qr' && (
+                {(scanMode === 'qr' || scanMode === 'text') && (
                   <>
                     <div className="relative">
                       <video
@@ -257,7 +257,7 @@ function ScanView() {
                     </div>
                   </>
                 )}
-                {scanMode !== 'qr' && (
+                {scanMode === 'nfc' && (
                   <div className="bg-slate-800/60 backdrop-blur-xl rounded-2xl p-8 shadow-lg border border-slate-700/50">
                     <p className="text-slate-400 text-center font-medium">Feature coming soon...</p>
                   </div>
