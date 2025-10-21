@@ -1,0 +1,5 @@
+fastapi>=0.95
+uvicorn[standard]>=0.22
+playwright>=1.40
+beautifulsoup4>=4.12
+httpx>=0.24
