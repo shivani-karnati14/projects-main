@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { QrCode, FileText, Nfc, Camera, X } from 'lucide-react';
-import Tesseract from 'tesseract.js';
+import { QrCode, FileText, Nfc, Camera, X, ExternalLink } from 'lucide-react';
 
 type ScanMode = 'qr' | 'text' | 'nfc' | null;
 
@@ -8,16 +7,16 @@ function ScanView() {
   const [scanMode, setScanMode] = useState<ScanMode>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [status, setStatus] = useState<string>('Idle');
+  const [enrichResults, setEnrichResults] = useState<any>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const workerRef = useRef<any>(null);
 
-  const webhookUrl =
-    'http://localhost:5678/webhook-test/3f02f382-0683-4066-afca-16ca80c53cd5';
+  // Use environment variable for production, fallback to localhost for development
+  const enrichServiceUrl = import.meta.env.VITE_ENRICH_SERVICE_URL || 'http://localhost:8000/enrich';
 
-  // ---- QR Camera + OCR Start ----
+  // ---- Camera Setup ----
   useEffect(() => {
     if (isScanning && (scanMode === 'qr' || scanMode === 'text')) {
       startCamera();
@@ -28,15 +27,8 @@ function ScanView() {
   }, [isScanning, scanMode]);
 
   const startCamera = async () => {
-    setStatus('Initializing OCR engine and requesting camera...');
+    setStatus('Initializing camera...');
     try {
-      // ✅ Modern Tesseract.js (v5+) initialization
-      workerRef.current = await Tesseract.createWorker('eng', 1, {
-        logger: (m) => console.log('Tesseract:', m.status),
-      });
-      console.log('Tesseract.js Worker initialized.');
-
-      // ✅ Start camera
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
       });
@@ -45,10 +37,10 @@ function ScanView() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-      setStatus('Camera active. Position text and click capture.');
+      setStatus('Camera active. Position content and click capture.');
     } catch (error) {
-      console.error('Camera/OCR Init Error:', error);
-      setStatus('Error initializing OCR or accessing camera.');
+      console.error('Camera Error:', error);
+      setStatus('Error accessing camera.');
     }
   };
 
@@ -57,14 +49,10 @@ function ScanView() {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (workerRef.current) {
-      workerRef.current.terminate();
-      workerRef.current = null;
-    }
   };
 
   const captureAndProcess = async () => {
-    if (!videoRef.current || !canvasRef.current || !workerRef.current) {
+    if (!videoRef.current || !canvasRef.current) {
       setStatus('System not active.');
       return;
     }
@@ -83,49 +71,140 @@ function ScanView() {
 
     canvas.toBlob(async (blob) => {
       if (!blob) return setStatus('Failed to capture image.');
+
       try {
-        setStatus('Running OCR...');
-        const { data: { text } } = await workerRef.current.recognize(blob);
-        if (text && text.trim()) {
-          setStatus(`OCR Complete. Sending data to webhook...`);
-          await sendToWebhook(blob, text);
-        } else {
-          setStatus('No readable text found.');
+        setStatus('Processing with AI service...');
+
+        // Create FormData for your enrich_service API
+        const formData = new FormData();
+        formData.append('raw_text', '');
+        formData.append('name', '');
+        formData.append('company', '');
+        formData.append('image', new File([blob], 'ocr_capture.jpg', { type: 'image/jpeg' }));
+
+        // Send to your enrich_service API
+        const response = await fetch(enrichServiceUrl, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`API request failed: ${response.status}`);
         }
+
+        const enrichResult = await response.json();
+        
+        // NEW: If company info found, crawl for more details
+        let crawledData = null;
+        if (enrichResult.company_info && enrichResult.company_info.name) {
+          setStatus('Fetching detailed company information...');
+          crawledData = await fetchCompanyDetails(enrichResult.company_info.name);
+        }
+        
+        setStatus(`✅ Processing complete!`);
+        
+        // Store results for display (include both enrich and crawl data)
+        setEnrichResults({
+          ...enrichResult,
+          crawledData: crawledData
+        });
+
+        // Save to database
+        if (crawledData && crawledData.success) {
+          await saveToDatabase({
+            type: 'company_crawl',
+            company_name: crawledData.company_name,
+            ai_response: crawledData.ai_response,
+            url: crawledData.url,
+            crawled_at: crawledData.crawled_at,
+            enrich_data: enrichResult
+          });
+        }
+
+        console.log('Enrichment result:', enrichResult);
+        console.log('Crawled data:', crawledData);
+
+        stopCamera();
+
       } catch (err) {
-        console.error(err);
-        setStatus('OCR failed.');
+        console.error('Processing failed:', err);
+        setStatus('❌ Processing failed. Please try again.');
       }
     }, 'image/jpeg', 0.8);
   };
 
-  const sendToWebhook = async (imageBlob: Blob, text: string) => {
-    const formData = new FormData();
-    formData.append('ocr_image', imageBlob, 'ocr_capture.jpeg');
-    formData.append('extracted_text', text);
-
+  // NEW: Function to fetch company details from crawl endpoint
+  const fetchCompanyDetails = async (companyName: string) => {
     try {
-      const res = await fetch(webhookUrl, { method: 'POST', body: formData });
-      if (res.ok) {
-        setStatus(`✅ Data sent successfully.`);
-        stopCamera();
-      } else {
-        setStatus(`❌ Webhook error: ${res.status}`);
+      const response = await fetch('http://localhost:8000/crawl-company', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          company_name: companyName,
+          use_ai_extraction: 'true',
+          platform: 'linkedin'
+        })
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('Error fetching company details:', error);
+      return null;
+    }
+  };
+
+  // NEW: Function to save company data to database
+  const saveToDatabase = async (data: any) => {
+    try {
+      const response = await fetch('/api/save-company-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to save to database');
       }
-    } catch (e) {
-      setStatus('Network error while posting data.');
+      
+      const result = await response.json();
+      console.log('Saved to database:', result);
+      return result;
+    } catch (error) {
+      console.error('Error saving to database:', error);
+    }
+  };
+
+  const constructCompanyURL = (platform: string, company: string) => {
+    const cleanCompany = company.toLowerCase().replace(/\s+/g, '');
+    
+    switch (platform) {
+      case 'linkedin':
+        return `https://www.linkedin.com/company/${cleanCompany}`;
+      case 'website':
+        return `https://${cleanCompany}.com`;
+      case 'crunchbase':
+        return `https://crunchbase.com/organization/${cleanCompany}`;
+      default:
+        return `https://www.google.com/search?q=${encodeURIComponent(company)}`;
     }
   };
 
   const startScan = (mode: ScanMode) => {
     setScanMode(mode);
     setIsScanning(true);
+    setEnrichResults(null); // Clear previous results
   };
 
   const stopScan = () => {
     stopCamera();
     setIsScanning(false);
     setScanMode(null);
+    setEnrichResults(null);
   };
 
   return (
@@ -250,11 +329,106 @@ function ScanView() {
                       onClick={captureAndProcess}
                       className="mt-4 px-8 py-4 bg-gradient-to-r from-purple-500 to-cyan-500 text-white rounded-2xl hover:from-purple-600 hover:to-cyan-600 shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm border border-slate-600/50 font-semibold"
                     >
-                      📸 Capture & OCR
+                      📸 Capture & Process
                     </button>
                     <div className="bg-slate-800/60 backdrop-blur-xl rounded-2xl px-6 py-3 shadow-lg border border-slate-700/50">
                       <p className="text-slate-300 font-medium text-center">{status}</p>
                     </div>
+
+                    {/* AI Analysis Results */}
+                    {enrichResults && (
+                      <div className="mt-6 w-full max-w-md">
+                        <div className="bg-slate-800/60 backdrop-blur-xl rounded-2xl p-4 border border-slate-700/50">
+                          <h4 className="text-slate-200 font-semibold mb-3 flex items-center gap-2">
+                            🤖 AI Analysis Results
+                          </h4>
+                          
+                          {/* LinkedIn Profiles */}
+                          {enrichResults.linkedin_profiles && enrichResults.linkedin_profiles.length > 0 && (
+                            <div className="mb-4">
+                              <p className="text-slate-300 text-sm mb-2">LinkedIn Profiles Found:</p>
+                              {enrichResults.linkedin_profiles.slice(0, 2).map((profile: any, idx: number) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => window.open(profile.url, "_blank")}
+                                  className="w-full text-left p-3 bg-slate-700/50 rounded-lg hover:bg-slate-600/50 transition-colors mb-2 group"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <p className="text-cyan-400 text-sm font-medium truncate">
+                                        {profile.name || 'LinkedIn Profile'}
+                                      </p>
+                                      <p className="text-slate-400 text-xs truncate">
+                                        {profile.title || profile.company}
+                                      </p>
+                                    </div>
+                                    <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-cyan-400 transition-colors flex-shrink-0" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* Company Info */}
+                          {enrichResults.company_info && enrichResults.company_info.name && (
+                            <div className="mb-4">
+                              <p className="text-slate-300 text-sm mb-2">Company Information:</p>
+                              <div className="p-3 bg-slate-700/50 rounded-lg">
+                                <p className="text-emerald-400 text-sm font-medium">
+                                  {enrichResults.company_info.name}
+                                </p>
+                                {enrichResults.company_info.website && (
+                                  <button
+                                    onClick={() => window.open(enrichResults.company_info.website, "_blank")}
+                                    className="text-cyan-400 text-xs hover:text-cyan-300 underline mt-1 flex items-center gap-1"
+                                  >
+                                    Visit Website <ExternalLink className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {/* LinkedIn Company Link */}
+                                <button
+                                  onClick={() => window.open(constructCompanyURL('linkedin', enrichResults.company_info.name), "_blank")}
+                                  className="text-cyan-400 text-xs hover:text-cyan-300 underline mt-1 flex items-center gap-1 ml-2"
+                                >
+                                  LinkedIn Company <ExternalLink className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* NEW: Display Crawled Company Details */}
+                          {enrichResults.crawledData && enrichResults.crawledData.success && (
+                            <div className="mb-4">
+                              <p className="text-slate-300 text-sm mb-2">🕷️ Crawled Company Details:</p>
+                              <div className="p-3 bg-slate-700/50 rounded-lg">
+                                <p className="text-purple-400 text-sm font-medium mb-2">
+                                  AI-Extracted Information
+                                </p>
+                                {enrichResults.crawledData.ai_response && (
+                                  <div className="text-slate-300 text-xs bg-slate-800/50 p-2 rounded border-l-2 border-purple-400/50">
+                                    <pre className="whitespace-pre-wrap font-mono">
+                                      {enrichResults.crawledData.ai_response}
+                                    </pre>
+                                  </div>
+                                )}
+                                <div className="text-xs text-slate-400 mt-2">
+                                  Crawled from: {enrichResults.crawledData.url} ({enrichResults.crawledData.crawl_time?.toFixed(1)}s)
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Processing Stats */}
+                          {enrichResults.meta && (
+                            <div className="text-xs text-slate-400 border-t border-slate-700/50 pt-2">
+                              Processed in {enrichResults.meta.elapsed_seconds?.toFixed(1)}s • 
+                              {enrichResults.meta.linkedin_profiles_found || 0} profiles found
+                              {enrichResults.crawledData && ' • Company crawled'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
                 {scanMode === 'nfc' && (
