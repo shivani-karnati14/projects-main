@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { QrCode, FileText, Nfc, Camera, X } from 'lucide-react';
+import { QrCode, FileText, Nfc, Camera, X, ExternalLink } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 
 type ScanMode = 'qr' | 'nfc' | 'text' | null;
 
-// DetectedCard interface is now imported from cardDetection service
-
 function ScanView() {
   const [scanMode, setScanMode] = useState<ScanMode>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState<string>('Idle');
+  const [capturedImageUrl, setCapturedImageUrl] = useState<string | null>(null);
+  const [enrichResults, setEnrichResults] = useState<any>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -19,7 +20,7 @@ function ScanView() {
   const webhookUrl =
     'http://localhost:5678/webhook-test/3f02f382-0683-4066-afca-16ca80c53cd5';
 
-  // ---- QR Camera + OCR Start ----
+  // ---- Camera Setup ----
   useEffect(() => {
     if (isScanning && (scanMode === 'qr' || scanMode === 'text')) {
       startCamera();
@@ -38,6 +39,11 @@ function ScanView() {
   const startCamera = async () => {
     setStatus('Initializing OCR engine and requesting camera...');
     try {
+      // Correct Tesseract.js v6 initialization
+      const worker = await Tesseract.createWorker('eng');
+      workerRef.current = worker;
+      console.log('Tesseract.js worker initialized successfully.');
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
           facingMode: 'environment',
@@ -52,13 +58,11 @@ function ScanView() {
         await videoRef.current.play();
         setStatus('Camera ready. Position your business card and click "Capture Image".');
       }
-      setStatus('Camera active. Position text and click capture.');
     } catch (error) {
       console.error('Camera/OCR Init Error:', error);
       setStatus('Error initializing OCR or accessing camera.');
     }
   };
-
 
   const stopCamera = () => {
     if (streamRef.current) {
@@ -69,42 +73,86 @@ function ScanView() {
       workerRef.current.terminate();
       workerRef.current = null;
     }
+    
+    // Clean up captured image URL to prevent memory leaks
+    if (capturedImageUrl) {
+      URL.revokeObjectURL(capturedImageUrl);
+    }
   };
 
-  const captureAndProcess = async () => {
-    if (!videoRef.current || !canvasRef.current || !workerRef.current) {
-      setStatus('System not active.');
+  const captureImage = async () => {
+    if (!videoRef.current || !canvasRef.current) {
+      setStatus('Camera not ready');
       return;
     }
 
-    setStatus('Capturing frame...');
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    setIsProcessing(true);
+    setStatus('Capturing image...');
 
-    const captureWidth = 800;
-    const captureHeight = (video.videoHeight / video.videoWidth) * captureWidth;
-    canvas.width = captureWidth;
-    canvas.height = captureHeight;
-    ctx.drawImage(video, 0, 0, captureWidth, captureHeight);
-
-    canvas.toBlob(async (blob) => {
-      if (!blob) return setStatus('Failed to capture image.');
-      try {
-        setStatus('Running OCR...');
-        const { data: { text } } = await workerRef.current.recognize(blob);
-        if (text && text.trim()) {
-          setStatus(`OCR Complete. Sending data to webhook...`);
-          await sendToWebhook(blob, text);
-        } else {
-          setStatus('No readable text found.');
-        }
-      } catch (err) {
-        console.error(err);
-        setStatus('OCR failed.');
+    try {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        throw new Error('Canvas context not available');
       }
-    }, 'image/jpeg', 0.8);
+
+      // Set canvas size to video size
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      
+      // Draw video frame to canvas
+      ctx.drawImage(video, 0, 0);
+      
+      // Convert to blob
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setStatus('Failed to capture image');
+          setIsProcessing(false);
+          return;
+        }
+
+        // Show captured image
+        const url = URL.createObjectURL(blob);
+        setCapturedImageUrl(url);
+        
+        // Process the image
+        await processImage(blob);
+      }, 'image/jpeg', 0.9);
+      
+    } catch (error) {
+      console.error('Capture error:', error);
+      setStatus('Capture failed: ' + (error instanceof Error ? error.message : String(error)));
+      setIsProcessing(false);
+    }
+  };
+
+  const processImage = async (blob: Blob) => {
+    setStatus('Running OCR...');
+    
+    try {
+      if (!workerRef.current) {
+        throw new Error('OCR worker not initialized');
+      }
+      
+      const { data: { text } } = await workerRef.current.recognize(blob);
+      
+      if (text && text.trim()) {
+        // Display OCR results directly instead of sending to webhook
+        setStatus(`✅ OCR Complete!\n\n📝 Extracted Text:\n${text}`);
+        // Comment out webhook call for testing
+        // await sendToWebhook(blob, text);
+        setIsProcessing(false);
+      } else {
+        setStatus('No readable text found.');
+        setIsProcessing(false);
+      }
+    } catch (error) {
+      console.error('OCR error:', error);
+      setStatus('OCR failed: ' + (error instanceof Error ? error.message : String(error)));
+      setIsProcessing(false);
+    }
   };
 
   const sendToWebhook = async (imageBlob: Blob, text: string) => {
@@ -113,67 +161,32 @@ function ScanView() {
     formData.append('extracted_text', text);
 
     try {
-<<<<<<< HEAD
       const res = await fetch(webhookUrl, { method: 'POST', body: formData });
       if (res.ok) {
         setStatus(`✅ Data sent successfully.`);
-        stopCamera();
-=======
-      // First, try the simple method that doesn't depend on libraries
-      let qrResults = await qrDetectionService.detectQRCodesSimple(imageBlob);
-      console.log('📊 Simple QR Detection Results:', qrResults);
-      
-      // If simple method didn't work, try the library-based approach
-      if (qrResults.length === 0) {
-        console.log('🔄 Simple method failed, trying library-based detection...');
-        try {
-          // Convert blob to ImageData
-          const imageData = await blobToImageData(imageBlob);
-          
-          // Detect QR codes using frontend libraries
-          qrResults = await qrDetectionService.detectQRCodes(imageData);
-          console.log('📊 Library-based QR Detection Results:', qrResults);
-        } catch (libraryError) {
-          console.warn('❌ Library-based detection failed:', libraryError);
-        }
-      }
-      
-      if (qrResults.length > 0) {
-        // Parse QR codes
-        const parsedResults = qrResults.map(qr => ({
-          ...qr,
-          parsed: qrDetectionService.parseQRContent(qr.data)
-        }));
-        
-        // Fetch URL details for URLs
-        const urlDetails: Record<string, any> = {};
-        const urlsToFetch = qrResults
-          .filter(qr => qr.data.startsWith('http://') || qr.data.startsWith('https://') || qr.data.startsWith('www.'))
-          .map(qr => qr.data);
-        
-        for (const url of urlsToFetch) {
-          try {
-            const details = await qrDetectionService.fetchURLDetails(url);
-            urlDetails[url] = details;
-          } catch (error) {
-            urlDetails[url] = { success: false, error: String(error) };
-          }
-        }
-        
-        return {
-          success: true,
-          qrCodes: parsedResults,
-          qrCount: qrResults.length,
-          parsedData: {},
-          urlDetails: urlDetails,
-          error: null
-        };
->>>>>>> f06c001c1488632baca26c2403628e3ca9eea50a
+        setIsProcessing(false);
       } else {
         setStatus(`❌ Webhook error: ${res.status}`);
+        setIsProcessing(false);
       }
     } catch (e) {
       setStatus('Network error while posting data.');
+      setIsProcessing(false);
+    }
+  };
+
+  const constructCompanyURL = (platform: string, company: string) => {
+    const cleanCompany = company.toLowerCase().replace(/\s+/g, '');
+    
+    switch (platform) {
+      case 'linkedin':
+        return `https://www.linkedin.com/company/${cleanCompany}`;
+      case 'website':
+        return `https://${cleanCompany}.com`;
+      case 'crunchbase':
+        return `https://crunchbase.com/organization/${cleanCompany}`;
+      default:
+        return `https://www.google.com/search?q=${encodeURIComponent(company)}`;
     }
   };
 
@@ -236,8 +249,6 @@ function ScanView() {
                 </div>
               </button>
 
-
-
               {/* NFC */}
               <button
                 onClick={() => startScan('nfc')}
@@ -267,7 +278,7 @@ function ScanView() {
                 <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-violet-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <div className="relative z-10 flex flex-col items-center gap-4">
                   <div className="p-6 bg-gradient-to-br from-purple-500/20 to-violet-500/20 rounded-3xl group-hover:scale-110 transition-all duration-300 shadow-lg backdrop-blur-sm border border-purple-400/30">
-                    <FileImage className="w-12 h-12 text-purple-400 drop-shadow-sm" />
+                    <FileText className="w-12 h-12 text-purple-400 drop-shadow-sm" />
                   </div>
                   <div className="text-center">
                     <h3 className="text-xl font-semibold text-slate-200 mb-2 drop-shadow-sm">
@@ -371,20 +382,6 @@ function ScanView() {
                     <div className="mt-4 p-4 bg-slate-700/50 backdrop-blur-sm rounded-2xl border border-slate-600/50">
                       <p className="text-slate-200 whitespace-pre-line">{status}</p>
                     </div>
-                    <canvas
-                      ref={canvasRef}
-                      id="qr-canvas"
-                      className="hidden"
-                    />
-                    <button
-                      onClick={captureAndProcess}
-                      className="mt-4 px-8 py-4 bg-gradient-to-r from-purple-500 to-cyan-500 text-white rounded-2xl hover:from-purple-600 hover:to-cyan-600 shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm border border-slate-600/50 font-semibold"
-                    >
-                      📸 Capture & OCR
-                    </button>
-                    <div className="bg-slate-800/60 backdrop-blur-xl rounded-2xl px-6 py-3 shadow-lg border border-slate-700/50">
-                      <p className="text-slate-300 font-medium text-center">{status}</p>
-                    </div>
 
                     {/* AI Analysis Results */}
                     {enrichResults && (
@@ -472,14 +469,93 @@ function ScanView() {
                           {/* Processing Stats */}
                           {enrichResults.meta && (
                             <div className="text-xs text-slate-400 border-t border-slate-700/50 pt-2">
-                              Processed in {enrichResults.meta.elapsed_seconds?.toFixed(1)}s • 
-                              {enrichResults.meta.linkedin_profiles_found || 0} profiles found
-                              {enrichResults.crawledData && ' • Company crawled'}
+                              Processed in {(enrichResults && enrichResults.meta && typeof enrichResults.meta.elapsed_seconds === 'number')
+                                ? enrichResults.meta.elapsed_seconds.toFixed(1)
+                                : '--'
+                              }s •{' '}
+                              {(enrichResults && enrichResults.meta && typeof enrichResults.meta.linkedin_profiles_found === 'number')
+                                ? enrichResults.meta.linkedin_profiles_found
+                                : 0
+                              } profiles found
+                              {(enrichResults?.crawledData) ? ' • Company crawled' : ''}
                             </div>
                           )}
                         </div>
                       </div>
                     )}
+                  </>
+                )}
+                {scanMode === 'text' && (
+                  <>
+                    {/* Camera View */}
+                    <div className="relative w-full aspect-video rounded-xl bg-black flex items-center justify-center overflow-hidden">
+                      {capturedImageUrl ? (
+                        <img
+                          src={capturedImageUrl}
+                          alt="Captured document"
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <video
+                          ref={videoRef}
+                          className="w-full h-full object-contain"
+                          autoPlay
+                          muted
+                          playsInline
+                        />
+                      )}
+                    </div>
+                    
+                    {/* Hidden canvas for capture */}
+                    <canvas ref={canvasRef} className="hidden" />
+                    
+                    {/* Process Button */}
+                    <div className="mb-4 p-4 bg-slate-700/50 backdrop-blur-sm rounded-2xl border border-slate-600/50">
+                      <div className="text-center">
+                        <p className="text-sm text-slate-300 mb-2">
+                          OCR text extraction with Tesseract.js
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-4 mt-4">
+                      <button
+                        onClick={captureImage}
+                        disabled={isProcessing}
+                        className="px-6 py-3 bg-gradient-to-r from-purple-500 to-violet-500 text-white rounded-2xl hover:from-purple-600 hover:to-violet-600 shadow-lg hover:shadow-xl transition-all duration-300 flex items-center gap-2 disabled:opacity-50 backdrop-blur-sm border border-slate-600/50 font-semibold"
+                      >
+                        <Camera className="w-4 h-4" />
+                        {isProcessing ? 'Processing...' : 'Capture Text'}
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          setCapturedImageUrl(null);
+                          setStatus('Restarting camera...');
+                          // Restart the camera
+                          stopCamera();
+                          setTimeout(() => {
+                            startCamera();
+                          }, 100);
+                        }}
+                        className="px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-2xl hover:from-yellow-600 hover:to-orange-600 shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm border border-slate-600/50 font-semibold"
+                      >
+                        Reset
+                      </button>
+                      
+                      <button
+                        onClick={stopScan}
+                        className="px-6 py-3 bg-gradient-to-r from-gray-500 to-gray-600 text-white rounded-2xl hover:from-gray-600 hover:to-gray-700 shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm border border-slate-600/50 font-semibold"
+                      >
+                        Stop Camera
+                      </button>
+                    </div>
+                    
+                    {/* Status Display */}
+                    <div className="mt-4 p-4 bg-slate-700/50 backdrop-blur-sm rounded-2xl border border-slate-600/50">
+                      <p className="text-slate-200 whitespace-pre-line">{status}</p>
+                    </div>
                   </>
                 )}
                 {scanMode !== 'qr' && scanMode !== 'text' && (
