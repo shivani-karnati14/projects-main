@@ -8,6 +8,54 @@
   </head>
   <body>
     <div id="root"></div>
+    
+    <!-- QR Detection Libraries with fallbacks -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" 
+            onerror="console.warn('jsQR CDN failed, will try manual load')"></script>
+    <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"
+            onerror="console.warn('ZXing CDN failed, continuing without it')"></script>
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+            onerror="console.warn('Tesseract CDN failed, OCR may be limited')"></script>
+    
+    <!-- Alternative CDN sources as fallbacks -->
+    <script>
+      // Debug library loading
+      window.addEventListener('load', () => {
+        console.log('🔍 Checking library availability after page load:');
+        console.log('jsQR available:', typeof jsQR !== 'undefined');
+        console.log('ZXing available:', typeof ZXing !== 'undefined');
+        console.log('window.jsQR:', window.jsQR);
+        console.log('window.ZXing:', window.ZXing);
+        
+        // Try to use jsQR if available
+        if (typeof jsQR !== 'undefined') {
+          console.log('✅ jsQR is loaded and ready');
+        } else {
+          console.log('❌ jsQR failed to load, trying alternative...');
+          loadJSQRAlternative();
+        }
+      });
+      
+      function loadJSQRAlternative() {
+        const fallbackScript = document.createElement('script');
+        fallbackScript.src = 'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js';
+        fallbackScript.onload = () => {
+          console.log('✅ jsQR loaded from alternative CDN');
+          window.jsQR = jsQR; // Ensure it's on window object
+        };
+        fallbackScript.onerror = () => {
+          console.warn('❌ All jsQR sources failed');
+          // Try one more alternative
+          const lastResort = document.createElement('script');
+          lastResort.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+          lastResort.onload = () => console.log('✅ jsQR loaded from last resort CDN');
+          lastResort.onerror = () => console.error('❌ All jsQR CDN sources failed');
+          document.head.appendChild(lastResort);
+        };
+        document.head.appendChild(fallbackScript);
+      }
+    </script>
+    
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

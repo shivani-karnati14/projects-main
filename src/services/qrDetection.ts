@@ -34,52 +34,185 @@ export interface ParsedQRData {
 class QRDetectionService {
   private isInitialized = false;
 
+  // Add a method to check library status without throwing errors
+  checkLibraryStatus(): { jsQR: boolean; ZXing: boolean } {
+    const status = {
+      jsQR: typeof window.jsQR !== 'undefined' && window.jsQR !== null,
+      ZXing: typeof window.ZXing !== 'undefined' && window.ZXing !== null
+    };
+    console.log('📚 Library status check:', status);
+    return status;
+  }
+
+  // Simple fallback method that doesn't require any libraries
+  async detectQRCodesSimple(imageBlob: Blob): Promise<QRCodeResult[]> {
+    console.log('🔧 Using simple detection method (no libraries required)');
+    console.log('📦 Image blob size:', imageBlob.size, 'type:', imageBlob.type);
+    
+    try {
+      // Convert blob to base64 for API
+      console.log('🔄 Converting image to base64...');
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64Data = result.split(',')[1]; // Remove data:image/... prefix
+          console.log('✅ Base64 conversion complete, length:', base64Data.length);
+          resolve(base64Data);
+        };
+        reader.onerror = (error) => {
+          console.error('❌ FileReader error:', error);
+          reject(error);
+        };
+        reader.readAsDataURL(imageBlob);
+      });
+
+      // Call backend API directly
+      console.log('🌐 Calling backend QR API...');
+      const response = await fetch('http://localhost:8000/qr-scan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: base64,
+          format: 'base64'
+        })
+      });
+
+      console.log('📡 Backend response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Backend QR detection response:', data);
+        
+        if (data.qr_codes && data.qr_codes.length > 0) {
+          const qrResults = data.qr_codes.map((qr: any) => ({
+            data: qr.data,
+            type: qr.type || 'QRCODE',
+            method: 'backend-api'
+          }));
+          console.log('🎯 Mapped QR results:', qrResults);
+          return qrResults;
+        } else {
+          console.log('📭 No QR codes found by backend');
+        }
+      } else {
+        const errorText = await response.text();
+        console.error('❌ Backend API error:', response.status, errorText);
+      }
+      
+      return [];
+    } catch (error) {
+      console.error('❌ Simple detection method failed:', error);
+      return [];
+    }
+  }
+
   async initialize(): Promise<void> {
     if (this.isInitialized) return;
 
-    // Wait for libraries to load
-    await this.waitForLibraries();
+    console.log('🚀 Initializing QR Detection Service...');
+    
+    try {
+      // Check for libraries
+      await this.waitForLibraries();
+    } catch (error) {
+      console.warn('⚠️ Library check completed with warnings:', error);
+    }
+    
+    // Always mark as initialized - we'll work with whatever is available
     this.isInitialized = true;
+    
+    console.log('🏁 QR Detection Service initialized');
   }
 
   private async waitForLibraries(): Promise<void> {
-    const maxWaitTime = 10000; // 10 seconds
+    const maxWaitTime = 5000; // Reduced to 5 seconds
     const startTime = Date.now();
+    
+    console.log('🔄 Checking for QR detection libraries...');
 
+    // Quick check first
+    if (typeof window.jsQR !== 'undefined' && window.jsQR) {
+      console.log('✅ jsQR already available');
+      return;
+    }
+
+    // Wait a bit for libraries to load
     while (Date.now() - startTime < maxWaitTime) {
-      if (window.jsQR && window.ZXing) {
-        console.log('✅ QR detection libraries loaded');
+      const jsQRLoaded = typeof window.jsQR !== 'undefined' && window.jsQR !== null;
+      
+      if (jsQRLoaded) {
+        console.log('✅ jsQR loaded successfully');
         return;
       }
+      
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    throw new Error('QR detection libraries failed to load');
+    // Don't throw error, just log warning and continue
+    console.warn('⚠️ Local QR libraries not available, will use API methods only');
+    
+    // Check what's actually available for debugging
+    const availableLibs = [];
+    if (window.jsQR) availableLibs.push('jsQR');
+    if (window.ZXing) availableLibs.push('ZXing');
+    
+    console.log('📚 Available libraries:', availableLibs.length > 0 ? availableLibs : 'none');
   }
 
   async detectQRCodes(imageData: ImageData): Promise<QRCodeResult[]> {
-    await this.initialize();
+    try {
+      await this.initialize();
+    } catch (initError) {
+      console.warn('⚠️ Initialization failed, continuing with available methods:', initError);
+    }
     
     const results: QRCodeResult[] = [];
     
     try {
-      // Try original image first
-      console.log('🔍 Trying original image...');
-      const jsQRResult = this.detectWithJSQR(imageData);
-      if (jsQRResult) {
-        results.push(jsQRResult);
-        console.log('✅ jsQR detected QR code:', jsQRResult.data);
+      // Check what libraries are actually available
+      const libraryStatus = this.checkLibraryStatus();
+      console.log('📚 Current library status:', libraryStatus);
+      
+      // Method 1: Try jsQR with original image first (if available)
+      if (typeof window.jsQR !== 'undefined' && window.jsQR) {
+        console.log('🔍 Trying original image with jsQR...');
+        const jsQRResult = this.detectWithJSQR(imageData);
+        if (jsQRResult) {
+          results.push(jsQRResult);
+          console.log('✅ jsQR detected QR code:', jsQRResult.data);
+          return results; // Return early if we found something
+        } else {
+          console.log('❌ jsQR found no QR codes on original image');
+        }
+      } else {
+        console.log('⚠️ jsQR not available, skipping to API methods');
       }
 
-      // If no QR codes found, try with image preprocessing
+      // Method 1B: Try goQR.me API with original image first (most reliable)
       if (results.length === 0) {
-        console.log('🔍 No QR codes found, trying with image preprocessing...');
+        console.log('🌐 Trying goQR.me API with original image...');
+        try {
+          const goQRResults = await this.detectWithGoQRAPI(imageData);
+          if (goQRResults.length > 0) {
+            results.push(...goQRResults);
+            console.log('✅ goQR.me API detected QR code:', goQRResults[0].data);
+            return results; // Return early if API succeeds
+          }
+        } catch (error) {
+          console.warn('goQR.me API detection failed:', error);
+        }
+      }
+
+      // Method 2: Preprocessing if jsQR is available and we still haven't found anything
+      if (results.length === 0 && typeof window.jsQR !== 'undefined' && window.jsQR) {
+        console.log('🔍 Trying preprocessing methods...');
+        const processedImages = this.preprocessImage(imageData);
         
-        // Try different preprocessing approaches
-        const preprocessedImages = this.preprocessImage(imageData);
-        
-        for (let i = 0; i < preprocessedImages.length; i++) {
-          const processedImage = preprocessedImages[i];
+        for (let i = 0; i < processedImages.length; i++) {
+          const processedImage = processedImages[i];
           console.log(`🔍 Trying preprocessing method ${i + 1}...`);
           
           const processedResult = this.detectWithJSQR(processedImage);

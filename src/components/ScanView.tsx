@@ -345,13 +345,24 @@ function ScanView() {
     console.log('🔍 Processing QR codes with frontend detection...');
     
     try {
-      // Convert blob to ImageData
-      const imageData = await blobToImageData(imageBlob);
+      // First, try the simple method that doesn't depend on libraries
+      let qrResults = await qrDetectionService.detectQRCodesSimple(imageBlob);
+      console.log('📊 Simple QR Detection Results:', qrResults);
       
-      // Detect QR codes using frontend libraries
-      const qrResults = await qrDetectionService.detectQRCodes(imageData);
-      
-      console.log('📊 Frontend QR Detection Results:', qrResults);
+      // If simple method didn't work, try the library-based approach
+      if (qrResults.length === 0) {
+        console.log('🔄 Simple method failed, trying library-based detection...');
+        try {
+          // Convert blob to ImageData
+          const imageData = await blobToImageData(imageBlob);
+          
+          // Detect QR codes using frontend libraries
+          qrResults = await qrDetectionService.detectQRCodes(imageData);
+          console.log('📊 Library-based QR Detection Results:', qrResults);
+        } catch (libraryError) {
+          console.warn('❌ Library-based detection failed:', libraryError);
+        }
+      }
       
       if (qrResults.length > 0) {
         // Parse QR codes
