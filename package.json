@@ -13,8 +13,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "framer-motion": "^12.23.24",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.344.0",
     "n8n": "^1.115.3",
+    "qr-scanner": "^1.4.2",
+    "qrcode-reader": "^1.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sonner": "^2.0.7",

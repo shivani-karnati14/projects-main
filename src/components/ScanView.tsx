@@ -113,10 +113,62 @@ function ScanView() {
     formData.append('extracted_text', text);
 
     try {
+<<<<<<< HEAD
       const res = await fetch(webhookUrl, { method: 'POST', body: formData });
       if (res.ok) {
         setStatus(`✅ Data sent successfully.`);
         stopCamera();
+=======
+      // First, try the simple method that doesn't depend on libraries
+      let qrResults = await qrDetectionService.detectQRCodesSimple(imageBlob);
+      console.log('📊 Simple QR Detection Results:', qrResults);
+      
+      // If simple method didn't work, try the library-based approach
+      if (qrResults.length === 0) {
+        console.log('🔄 Simple method failed, trying library-based detection...');
+        try {
+          // Convert blob to ImageData
+          const imageData = await blobToImageData(imageBlob);
+          
+          // Detect QR codes using frontend libraries
+          qrResults = await qrDetectionService.detectQRCodes(imageData);
+          console.log('📊 Library-based QR Detection Results:', qrResults);
+        } catch (libraryError) {
+          console.warn('❌ Library-based detection failed:', libraryError);
+        }
+      }
+      
+      if (qrResults.length > 0) {
+        // Parse QR codes
+        const parsedResults = qrResults.map(qr => ({
+          ...qr,
+          parsed: qrDetectionService.parseQRContent(qr.data)
+        }));
+        
+        // Fetch URL details for URLs
+        const urlDetails: Record<string, any> = {};
+        const urlsToFetch = qrResults
+          .filter(qr => qr.data.startsWith('http://') || qr.data.startsWith('https://') || qr.data.startsWith('www.'))
+          .map(qr => qr.data);
+        
+        for (const url of urlsToFetch) {
+          try {
+            const details = await qrDetectionService.fetchURLDetails(url);
+            urlDetails[url] = details;
+          } catch (error) {
+            urlDetails[url] = { success: false, error: String(error) };
+          }
+        }
+        
+        return {
+          success: true,
+          qrCodes: parsedResults,
+          qrCount: qrResults.length,
+          parsedData: {},
+          urlDetails: urlDetails,
+          error: null
+        };
+>>>>>>> f06c001c1488632baca26c2403628e3ca9eea50a
       } else {
         setStatus(`❌ Webhook error: ${res.status}`);
       }
