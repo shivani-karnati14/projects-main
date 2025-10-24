@@ -1,17 +1,34 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Supabase configuration
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key'
+// Supabase configuration with validation - MUST USE VITE_ PREFIX
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 // Debug logging
 console.log('🔧 Supabase Configuration:')
-console.log('URL:', supabaseUrl)
-console.log('Key:', supabaseAnonKey ? 'Present' : 'Missing')
-console.log('Environment variables loaded:', import.meta.env.VITE_SUPABASE_URL ? 'Yes' : 'No')
+console.log('URL:', supabaseUrl || 'MISSING')
+console.log('Key:', supabaseAnonKey ? 'Present ✅' : 'MISSING ❌')
+console.log('Environment variables loaded:', import.meta.env.VITE_SUPABASE_URL ? 'Yes ✅' : 'No ❌')
 
-// Create Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Validate credentials
+if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://your-project.supabase.co') {
+  console.error('❌ Supabase credentials not configured properly!')
+  console.error('Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file')
+}
+
+// Create Supabase client with fallback that will fail gracefully
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key'
+)
+
+// Check if Supabase is configured
+export const isSupabaseConfigured = Boolean(
+  supabaseUrl && 
+  supabaseAnonKey && 
+  supabaseUrl !== 'https://your-project.supabase.co' &&
+  supabaseUrl !== 'https://placeholder.supabase.co'
+)
 
 // Database types
 export interface StructuredData {
@@ -23,13 +40,13 @@ export interface StructuredData {
   email?: string
   website?: string
   address?: string
-  other_info?: string[]
-  source: 'text_scan' | 'file_upload'
-  processing_method?: string
-  confidence_score?: number
   raw_text?: string
+  confidence?: number
+  engine_used: "ai_vision"
+  qr_codes?: string[]
+  qr_count?: number
   created_at?: string
-  updated_at?: string
+  extracted_at?: string
 }
 
 export interface LinkedInCompany {
@@ -48,11 +65,20 @@ export interface LinkedInCompany {
 
 // Database service
 export class DatabaseService {
+  // Check if Supabase is configured before operations
+  private static checkConfiguration() {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your .env file')
+    }
+  }
+
   // Save structured data from text scanning
   static async saveTextScanData(data: Omit<StructuredData, 'id' | 'created_at' | 'updated_at'>) {
     try {
+      this.checkConfiguration()
+      
       const { data: result, error } = await supabase
-        .from('structured_data')
+        .from('business_cards')
         .insert([{
           name: data.name,
           title: data.title,
@@ -61,10 +87,10 @@ export class DatabaseService {
           email: data.email,
           website: data.website,
           address: data.address,
-          other_info: data.other_info,
-          source: data.source,
-          processing_method: data.processing_method,
-          confidence_score: data.confidence_score,
+          engine_used: data.engine_used,
+          qr_codes: data.qr_codes,
+          qr_count: data.qr_count,
+          confidence: data.confidence,
           raw_text: data.raw_text
         }])
         .select()
@@ -86,10 +112,12 @@ export class DatabaseService {
   // Save structured data from file upload
   static async saveFileUploadData(data: Omit<StructuredData, 'id' | 'created_at' | 'updated_at'>) {
     try {
+      this.checkConfiguration()
+      
       console.log('💾 Attempting to save file upload data:', data)
       
       const { data: result, error } = await supabase
-        .from('structured_data')
+        .from('business_cards')
         .insert([{
           name: data.name,
           title: data.title,
@@ -98,10 +126,10 @@ export class DatabaseService {
           email: data.email,
           website: data.website,
           address: data.address,
-          other_info: data.other_info,
-          source: data.source,
-          processing_method: data.processing_method,
-          confidence_score: data.confidence_score,
+          engine_used: data.engine_used,
+          qr_codes: data.qr_codes,
+          qr_count: data.qr_count,
+          confidence: data.confidence,
           raw_text: data.raw_text
         }])
         .select()
@@ -129,8 +157,10 @@ export class DatabaseService {
   // Get all structured data
   static async getAllStructuredData() {
     try {
+      this.checkConfiguration()
+      
       const { data, error } = await supabase
-        .from('structured_data')
+        .from('business_cards')
         .select('*')
         .order('created_at', { ascending: false })
 
@@ -149,8 +179,10 @@ export class DatabaseService {
   // Get structured data by source
   static async getStructuredDataBySource(source: 'text_scan' | 'file_upload') {
     try {
+      this.checkConfiguration()
+      
       const { data, error } = await supabase
-        .from('structured_data')
+        .from('business_cards')
         .select('*')
         .eq('source', source)
         .order('created_at', { ascending: false })
@@ -170,8 +202,10 @@ export class DatabaseService {
   // Delete structured data
   static async deleteStructuredData(id: number) {
     try {
+      this.checkConfiguration()
+      
       const { error } = await supabase
-        .from('structured_data')
+        .from('business_cards')
         .delete()
         .eq('id', id)
 
@@ -193,6 +227,8 @@ export class DatabaseService {
   // Save LinkedIn company data
   static async saveLinkedInCompany(data: Omit<LinkedInCompany, 'id' | 'created_at' | 'updated_at'>) {
     try {
+      this.checkConfiguration()
+      
       const { data: savedData, error } = await supabase
         .from('linkedin_companies')
         .insert([data])
@@ -215,6 +251,8 @@ export class DatabaseService {
   // Get all LinkedIn companies
   static async getAllLinkedInCompanies(): Promise<LinkedInCompany[]> {
     try {
+      this.checkConfiguration()
+      
       const { data, error } = await supabase
         .from('linkedin_companies')
         .select('*')
@@ -235,6 +273,8 @@ export class DatabaseService {
   // Get LinkedIn companies by industry
   static async getLinkedInCompaniesByIndustry(industry: string): Promise<LinkedInCompany[]> {
     try {
+      this.checkConfiguration()
+      
       const { data, error } = await supabase
         .from('linkedin_companies')
         .select('*')
@@ -256,6 +296,8 @@ export class DatabaseService {
   // Search LinkedIn companies
   static async searchLinkedInCompanies(query: string): Promise<LinkedInCompany[]> {
     try {
+      this.checkConfiguration()
+      
       const { data, error } = await supabase
         .from('linkedin_companies')
         .select('*')
@@ -277,6 +319,8 @@ export class DatabaseService {
   // Delete LinkedIn company
   static async deleteLinkedInCompany(id: number) {
     try {
+      this.checkConfiguration()
+      
       const { error } = await supabase
         .from('linkedin_companies')
         .delete()
@@ -298,6 +342,8 @@ export class DatabaseService {
   // Update LinkedIn company
   static async updateLinkedInCompany(id: number, data: Partial<LinkedInCompany>) {
     try {
+      this.checkConfiguration()
+      
       const { data: updatedData, error } = await supabase
         .from('linkedin_companies')
         .update(data)

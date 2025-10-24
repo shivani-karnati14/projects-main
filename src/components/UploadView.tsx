@@ -184,114 +184,151 @@ function UploadView({ onFilesProcessed }: UploadViewProps) {
   };
 
   // Upload all files using batch endpoint
-  const uploadAllFilesBatch = async () => {
-    const pendingFiles = uploadedFiles.filter(file => file.status === 'pending');
-    if (pendingFiles.length === 0) return;
+const uploadAllFilesBatch = async () => {
+  const pendingFiles = uploadedFiles.filter(file => file.status === 'pending');
+  if (pendingFiles.length === 0) return;
 
-    setIsUploading(true);
-    setUploadStatus(`Processing ${pendingFiles.length} files...`);
+  setIsUploading(true);
+  setUploadStatus(`Processing ${pendingFiles.length} files...`);
+  
+  try {
+    // First, detect QR codes in all files
+    setUploadStatus('🔍 Detecting QR codes with enhanced algorithms (jsQR + goQR.me API)...');
+    const qrResults = await detectQRCodesInFiles(pendingFiles);
     
-    try {
-      // First, detect QR codes in all files
-      setUploadStatus('🔍 Detecting QR codes with enhanced algorithms (jsQR + goQR.me API)...');
-      const qrResults = await detectQRCodesInFiles(pendingFiles);
-      
-      if (qrResults.length > 0) {
-        console.log('📱 QR codes found in files:', qrResults);
-        setUploadStatus(`📱 Found QR codes in ${qrResults.length} files. Processing with OCR...`);
-      }
-      const formData = new FormData();
-      pendingFiles.forEach(file => {
-        formData.append('files', file.file);
-      });
+    if (qrResults.length > 0) {
+      console.log('📱 QR codes found in files:', qrResults);
+      setUploadStatus(`📱 Found QR codes in ${qrResults.length} files. Processing with AI OCR...`);
+    }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for batch processing
+    // Process each file individually with AI business card endpoint
+    const results = [];
+    const processedFiles = new Set<string>();
+    
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const file = pendingFiles[i];
+      setUploadStatus(`🤖 Processing file ${i + 1}/${pendingFiles.length}: ${file.file.name}...`);
       
-      const response = await fetch('http://localhost:8000/batch-ocr', {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
-      
-      clearTimeout(timeoutId);
+      try {
+        const formData = new FormData();
+        formData.append('file', file.file);
 
-      if (!response.ok) {
-        throw new Error(`Batch upload failed: ${response.status}`);
-      }
-
-      const batchResult = await response.json();
-      
-      if (batchResult.success) {
-        setUploadStatus(`✅ Processed ${batchResult.successful_files}/${batchResult.total_files} files successfully`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 1 minute timeout per file
         
-        // Update all files with results (merge QR and OCR data)
-        const processedFiles = new Set<string>();
+        const response = await fetch('http://localhost:8000/ai-business-card', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
         
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`Upload failed: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        // Merge QR data with AI OCR result
+        const qrData = qrResults.find((q: any) => q.filename === file.file.name);
+        const mergedResult = {
+          ...result,
+          filename: file.file.name,
+          qr_codes: qrData?.qr_codes || [],
+          qr_count: qrData?.qr_count || 0,
+          has_qr_codes: (qrData?.qr_count || 0) > 0,
+          // Map AI business card fields to expected format
+          text: result.raw_analysis || result.formatted_output || '',
+          engine: result.method || 'ai_vision',
+          engine_used: result.method || 'ai_vision',
+          // Keep structured_data for compatibility
+          structured_data: result.structured_data || result.structuredInfo || {},
+          structuredInfo: result.structured_data || result.structuredInfo || {},
+        };
+        
+        results.push(mergedResult);
+        
+        // Save to database if processing was successful (prevent duplicates)
+        if (result.success && !processedFiles.has(file.file.name)) {
+          console.log('🔄 Calling saveToDatabase for file:', file.file.name);
+          processedFiles.add(file.file.name);
+          await saveToDatabase(mergedResult);
+        } else if (processedFiles.has(file.file.name)) {
+          console.log('⚠️ File already saved to database, skipping:', file.file.name);
+        }
+        
+        // Update individual file status
         setUploadedFiles(prev => 
-          prev.map(file => {
-            const result = batchResult.results.find((r: any) => r.filename === file.file.name);
-            const qrData = qrResults.find((q: any) => q.filename === file.file.name);
-            
-            if (result) {
-              // Merge QR data with OCR result
-              const mergedResult = {
-                ...result,
-                qr_codes: qrData?.qr_codes || [],
-                qr_count: qrData?.qr_count || 0,
-                has_qr_codes: (qrData?.qr_count || 0) > 0
-              };
-              
-              // Save to database if processing was successful (prevent duplicates)
-              if (result.success && !processedFiles.has(file.file.name)) {
-                console.log('🔄 Calling saveToDatabase for file:', file.file.name);
-                processedFiles.add(file.file.name);
-                saveToDatabase(mergedResult);
-              } else if (processedFiles.has(file.file.name)) {
-                console.log('⚠️ File already saved to database, skipping:', file.file.name);
-              }
-              
-              return {
-                ...file,
-                status: result.success ? 'completed' : 'error',
-                progress: result.success ? 100 : 0,
-                result: result.success ? mergedResult : null,
-                error: result.success ? null : result.error
-              };
-            }
-            return file;
-          })
+          prev.map(f => 
+            f.id === file.id
+              ? {
+                  ...f,
+                  status: result.success ? 'completed' : 'error',
+                  progress: result.success ? 100 : 0,
+                  result: result.success ? mergedResult : null,
+                  error: result.success ? null : result.error || 'Processing failed'
+                }
+              : f
+          )
         );
         
-        onFilesProcessed?.(batchResult.results);
-      } else {
-        throw new Error(batchResult.error || 'Batch processing failed');
-      }
-    } catch (error) {
-      console.error('Batch upload failed:', error);
-      
-      let errorMessage = 'Batch upload failed';
-      if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          errorMessage = 'Upload timed out. Please try with smaller images or fewer files.';
-        } else {
-          errorMessage = error.message;
+      } catch (error) {
+        console.error(`Failed to process ${file.file.name}:`, error);
+        
+        let errorMessage = 'Processing failed';
+        if (error instanceof Error) {
+          if (error.name === 'AbortError') {
+            errorMessage = 'Processing timed out. Please try with a smaller image.';
+          } else {
+            errorMessage = error.message;
+          }
         }
+        
+        results.push({
+          filename: file.file.name,
+          success: false,
+          error: errorMessage
+        });
+        
+        // Update file status to error
+        setUploadedFiles(prev => 
+          prev.map(f => 
+            f.id === file.id
+              ? { ...f, status: 'error', error: errorMessage }
+              : f
+          )
+        );
       }
-      
-      // Mark all pending files as error
-      setUploadedFiles(prev => 
-        prev.map(file => 
-          file.status === 'pending' 
-            ? { ...file, status: 'error', error: errorMessage }
-            : file
-        )
-      );
-    } finally {
-      setIsUploading(false);
-      setTimeout(() => setUploadStatus(''), 5000); // Clear status after 5 seconds
     }
-  };
+    
+    // Final status update
+    const successCount = results.filter(r => r.success !== false).length;
+    setUploadStatus(`✅ Processed ${successCount}/${pendingFiles.length} files successfully`);
+    
+    onFilesProcessed?.(results);
+    
+  } catch (error) {
+    console.error('Batch upload failed:', error);
+    
+    let errorMessage = 'Batch upload failed';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+    
+    // Mark all pending files as error
+    setUploadedFiles(prev => 
+      prev.map(file => 
+        file.status === 'pending' 
+          ? { ...file, status: 'error', error: errorMessage }
+          : file
+      )
+    );
+  } finally {
+    setIsUploading(false);
+    setTimeout(() => setUploadStatus(''), 5000); // Clear status after 5 seconds
+  }
+};
 
   // Upload all files (removed wrapper to prevent duplicate processing)
 
