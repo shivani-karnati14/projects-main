@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { CheckCircle2, Calendar, User, Mail, Phone, Building2, MapPin } from 'lucide-react';
+import { CheckCircle2, Calendar } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import type { UserInfo, LLMResponse } from '../../types/cardScanner';
@@ -20,7 +20,6 @@ export function ResultScreen({
   onScanAnother 
 }: ResultScreenProps) {
   const isCompleted = processingStatus === 'completed';
-  const extractedData = llmResponse?.extracted_data || {};
 
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
@@ -59,99 +58,8 @@ export function ResultScreen({
 
             {/* Extracted Information */}
             <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-slate-200">Contact Information</h3>
-              
-              <div className="grid gap-4">
-                {(userInfo.name || extractedData.name) && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.3 }}
-                    className="flex items-center gap-3 bg-slate-900/50 rounded-xl p-4"
-                  >
-                    <User className="w-5 h-5 text-cyan-400" />
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-500">Name</p>
-                      <p className="text-slate-200 font-medium">{userInfo.name || extractedData.name}</p>
-                    </div>
-                  </motion.div>
-                )}
-
-                {extractedData.title && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.35 }}
-                    className="flex items-center gap-3 bg-slate-900/50 rounded-xl p-4"
-                  >
-                    <User className="w-5 h-5 text-purple-400" />
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-500">Title</p>
-                      <p className="text-slate-200 font-medium">{extractedData.title}</p>
-                    </div>
-                  </motion.div>
-                )}
-
-                {userInfo.company && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.4 }}
-                    className="flex items-center gap-3 bg-slate-900/50 rounded-xl p-4"
-                  >
-                    <Building2 className="w-5 h-5 text-cyan-400" />
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-500">Company</p>
-                      <p className="text-slate-200 font-medium">{userInfo.company}</p>
-                    </div>
-                  </motion.div>
-                )}
-
-                {userInfo.email && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.45 }}
-                    className="flex items-center gap-3 bg-slate-900/50 rounded-xl p-4"
-                  >
-                    <Mail className="w-5 h-5 text-cyan-400" />
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-500">Email</p>
-                      <p className="text-slate-200 font-medium">{userInfo.email}</p>
-                    </div>
-                  </motion.div>
-                )}
-
-                {userInfo.phone && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.5 }}
-                    className="flex items-center gap-3 bg-slate-900/50 rounded-xl p-4"
-                  >
-                    <Phone className="w-5 h-5 text-cyan-400" />
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-500">Phone</p>
-                      <p className="text-slate-200 font-medium">{userInfo.phone}</p>
-                    </div>
-                  </motion.div>
-                )}
-
-                {extractedData.address && (
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.55 }}
-                    className="flex items-center gap-3 bg-slate-900/50 rounded-xl p-4"
-                  >
-                    <MapPin className="w-5 h-5 text-cyan-400" />
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-500">Address</p>
-                      <p className="text-slate-200 font-medium">{extractedData.address}</p>
-                    </div>
-                  </motion.div>
-                )}
-              </div>
+              <h3 className="text-lg font-semibold text-slate-200">Your card has been processed successfully!</h3>
+              <p className="text-slate-400">Thank you for using our service.</p>
             </div>
 
             {/* Confidence Score */}
