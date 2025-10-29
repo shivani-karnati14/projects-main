@@ -1,19 +1,17 @@
-import { useState } from 'react';
 import {
   MessageSquare,
   Home,
   Camera,
   Upload,
   BarChart3,
-  Users,
-  Database,
   Menu,
   Settings,
+  CreditCard,
 } from 'lucide-react';
 
 interface NavbarProps {
-  activeView: 'home' | 'chat' | 'scan' | 'upload' | 'analysis';
-  onNavClick: (view: 'home' | 'chat' | 'scan' | 'upload' | 'analysis') => void;
+  activeView: 'home' | 'chat' | 'scan' | 'upload' | 'analysis' | 'cardscanner';
+  onNavClick: (view: 'home' | 'chat' | 'scan' | 'upload' | 'analysis' | 'cardscanner') => void;
   isCollapsed: boolean;
   toggleCollapse: () => void;
 }
@@ -51,10 +49,11 @@ function NavButton({ label, icon, active, collapsed, onClick }: NavButtonProps) 
 }
 
 function Navbar({ activeView, onNavClick, isCollapsed, toggleCollapse }: NavbarProps) {
-  const navItems = [
+  const navItems: Array<{ label: string; icon: React.ReactNode; view: 'home' | 'chat' | 'scan' | 'upload' | 'analysis' | 'cardscanner' }> = [
     { label: 'Home', icon: <Home className="w-5 h-5" />, view: 'home' },
     { label: 'Chatterbox', icon: <MessageSquare className="w-5 h-5" />, view: 'chat' },
     { label: 'Scanner', icon: <Camera className="w-5 h-5" />, view: 'scan' },
+    { label: 'Card Scanner', icon: <CreditCard className="w-5 h-5" />, view: 'cardscanner' },
     { label: 'Upload Files', icon: <Upload className="w-5 h-5" />, view: 'upload' },
     { label: 'Analysis', icon: <BarChart3 className="w-5 h-5" />, view: 'analysis' },
   ];

@@ -1,13 +1,4 @@
 import { useState } from 'react';
-import {
-  Home,
-  MessageSquare,
-  Upload,
-  Camera,
-  Users,
-  BarChart3,
-  Database,
-} from 'lucide-react';
 import Navbar from './components/Navbar';
 import ChatView from './components/ChatView';
 import UploadView from './components/UploadView';
@@ -15,11 +6,10 @@ import ScanView from './components/ScanView';
 import DatabaseView from './components/DatabaseView';
 import { HomePage } from './components/HomePage';
 import { VoiceAssistant } from './components/VoiceAssistant';
+import { CardScannerApp } from './components/CardScannerApp';
 
 function App() {
-  const [activeView, setActiveView] = useState<'home' | 'chat' | 'upload' | 'scan' | 'analysis'>('home');
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanMode, setScanMode] = useState<'qr' | 'barcode' | 'nfc' | 'text' | null>(null);
+  const [activeView, setActiveView] = useState<'home' | 'chat' | 'upload' | 'scan' | 'analysis' | 'cardscanner'>('home');
   const [isVoiceAssistantOpen, setIsVoiceAssistantOpen] = useState(false);
 
   // analysis subsection state
@@ -30,13 +20,8 @@ function App() {
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false); // Side panel state
 
 
-  const handleNavClick = (view: 'home' | 'chat' | 'upload' | 'scan' | 'analysis') => {
+  const handleNavClick = (view: 'home' | 'chat' | 'upload' | 'scan' | 'analysis' | 'cardscanner') => {
     setActiveView(view);
-    // stop scanning when leaving scanner view
-    if (view !== 'scan') {
-      setIsScanning(false);
-      setScanMode(null);
-    }
 
     // if opening analysis, default to overview
     if (view === 'analysis') {
@@ -52,11 +37,6 @@ function App() {
       setIsCollapsed((prev) => !prev);
     }
   }
-
-  const stopScanning = () => {
-    setIsScanning(false);
-    setScanMode(null);
-  };
 
   const openVoiceAssistant = () => {
     setIsVoiceAssistantOpen(true);
@@ -101,6 +81,7 @@ function App() {
               setIsSidePanelOpen={setIsSidePanelOpen}
             />
           )}
+          {activeView === 'cardscanner' && <CardScannerApp />}
         </main>
       </div>
 
